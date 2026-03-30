@@ -183,7 +183,7 @@ export class Renderer {
     }
   }
 
-  // 绘制选择框
+  // 绘制选择框（世界坐标）
   renderSelectionRect(x1: number, y1: number, x2: number, y2: number): void {
     const { x: vpX, y: vpY, zoom } = this.viewport;
     
@@ -196,12 +196,12 @@ export class Renderer {
     const width = Math.abs(x2 - x1);
     const height = Math.abs(y2 - y1);
     
-    this.ctx.strokeStyle = '#2196F3';
-    this.ctx.lineWidth = 1 / zoom;
+    this.ctx.strokeStyle = 'rgba(0, 212, 255, 0.6)';
+    this.ctx.lineWidth = 2 / zoom;
     this.ctx.setLineDash([5 / zoom, 5 / zoom]);
     this.ctx.strokeRect(left, top, width, height);
     
-    this.ctx.fillStyle = 'rgba(33, 150, 243, 0.1)';
+    this.ctx.fillStyle = 'rgba(0, 212, 255, 0.1)';
     this.ctx.fillRect(left, top, width, height);
     this.ctx.setLineDash([]);
     

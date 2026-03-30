@@ -41,14 +41,17 @@ export const useEditorStore = defineStore('editor', () => {
     hexagons.value.clear();
     spatialIndex.value.clear();
     
-    // 计算网格范围（每个六边形约占 12px 宽度）
-    // 200000 个六边形，假设 450 x 450 的网格
-    const sideLen = Math.ceil(Math.sqrt(count * 2 / Math.sqrt(3)));
-    const halfSide = Math.ceil(sideLen / 2);
+    // 使用正确的 axial coordinate 网格生成
+    // 对于 axial 坐标: q + r + s = 0, 所以 s = -q - r
+    // 限制 |q| <= size, |r| <= size, |q + r| <= size
+    
+    const radius = Math.ceil(Math.sqrt(count / (2 * Math.sqrt(3)))) + 2;
     
     let created = 0;
-    for (let r = -halfSide; r <= halfSide && created < count; r++) {
-      for (let q = -halfSide; q <= halfSide && created < count; q++) {
+    for (let q = -radius; q <= radius && created < count; q++) {
+      const r1 = Math.max(-radius, -q - radius);
+      const r2 = Math.min(radius, -q + radius);
+      for (let r = r1; r <= r2 && created < count; r++) {
         const hex: Hexagon = {
           id: `${q},${r}`,
           q,
@@ -64,7 +67,7 @@ export const useEditorStore = defineStore('editor', () => {
     }
     
     isDirty.value = true;
-    saveToHistory();
+    // saveToHistory(); // 初始化不保存历史
   }
   
   // 选中六边形

@@ -115,8 +115,8 @@ function handleHexSelect(hex: Hexagon) {
   store.selectHexagon(hex, false);
 }
 
-function handleSelectionChange(ids: Set<string>) {
-  store.selectHexagons(ids, false);
+function handleSelectionChange(ids: Set<string>, addToSelection: boolean) {
+  store.selectHexagons(ids, addToSelection);
 }
 
 function handleViewportChange(x: number, y: number, zoom: number) {

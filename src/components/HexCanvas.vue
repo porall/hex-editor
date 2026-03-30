@@ -1,29 +1,31 @@
 <template>
-  <div class="hex-canvas-container">
+  <div class="hex-canvas-container" ref="containerRef">
     <canvas
       ref="canvasRef"
       class="hex-canvas"
       @mousedown="onMouseDown"
       @mousemove="onMouseMove"
       @mouseup="onMouseUp"
-      @wheel.prevent="onWheel"
+      @wheel="onWheel"
       @contextmenu.prevent
     ></canvas>
     
-    <!-- Selection Box Overlay -->
+    <!-- Selection Box Overlay (using screen coordinates) -->
     <div
-      v-if="isSelecting"
+      v-if="isSelecting && selectionRect.width > 5 && selectionRect.height > 5"
       class="selection-overlay"
-      :style="selectionStyle"
+      :style="selectionRectStyle"
     >
       <div class="selection-box"></div>
       <div class="selection-label">{{ selectionCount }} selected</div>
     </div>
 
     <!-- Zoom Indicator -->
-    <div class="zoom-indicator" v-if="showZoomHint">
-      <span>{{ Math.round(zoom * 100) }}%</span>
-    </div>
+    <Transition name="fade">
+      <div class="zoom-indicator" v-if="showZoomHint">
+        <span>{{ Math.round(zoom * 100) }}%</span>
+      </div>
+    </Transition>
 
     <!-- Coordinate Display -->
     <div class="coord-display" v-if="mouseWorldPos">
@@ -41,7 +43,6 @@ import { useEditorStore } from '../stores/editorStore';
 import { HexMath } from '../core/HexMath';
 import { SpatialIndex } from '../core/SpatialIndex';
 import { Renderer } from '../core/Renderer';
-import { InteractionManager } from '../core/Interaction';
 import type { Hexagon, Point } from '../core/types';
 
 const props = defineProps<{
@@ -51,39 +52,56 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'hexSelect', hex: Hexagon): void;
-  (e: 'selectionChange', ids: Set<string>): void;
+  (e: 'selectionChange', ids: Set<string>, addToSelection: boolean): void;
   (e: 'viewportChange', x: number, y: number, zoom: number): void;
 }>();
 
 const store = useEditorStore();
 
+const containerRef = ref<HTMLDivElement | null>(null);
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 let renderer: Renderer | null = null;
-let interactionManager: InteractionManager | null = null;
 let hexMath: HexMath | null = null;
 let spatialIndex: SpatialIndex | null = null;
 
+// Selection state (screen coordinates for DOM, world coordinates for query)
 const isSelecting = ref(false);
-const selectStart = ref<Point>({ x: 0, y: 0 });
-const selectEnd = ref<Point>({ x: 0, y: 0 });
+const selectStartScreen = ref<Point>({ x: 0, y: 0 });
+const selectStartWorld = ref<Point>({ x: 0, y: 0 });
+const selectEndScreen = ref<Point>({ x: 0, y: 0 });
+const selectEndWorld = ref<Point>({ x: 0, y: 0 });
+
+// Pan state
+const isPanning = ref(false);
+const lastPanX = ref(0);
+const lastPanY = ref(0);
+
+// Drag state
+const isDragging = ref(false);
+const dragHexes = ref<Hexagon[]>([]);
+
+// UI state
 const mouseWorldPos = ref<Point | null>(null);
 const zoom = ref(1);
 const showZoomHint = ref(false);
 const selectionCount = ref(0);
+const ctrlHeld = ref(false);
 
-const selectionStyle = computed(() => {
-  const left = Math.min(selectStart.value.x, selectEnd.value.x);
-  const top = Math.min(selectStart.value.y, selectEnd.value.y);
-  const width = Math.abs(selectEnd.value.x - selectStart.value.x);
-  const height = Math.abs(selectEnd.value.y - selectStart.value.y);
-  
-  return {
-    left: `${left}px`,
-    top: `${top}px`,
-    width: `${width}px`,
-    height: `${height}px`
-  };
+// Selection rectangle in screen coordinates
+const selectionRect = computed(() => {
+  const left = Math.min(selectStartScreen.value.x, selectEndScreen.value.x);
+  const top = Math.min(selectStartScreen.value.y, selectEndScreen.value.y);
+  const width = Math.abs(selectEndScreen.value.x - selectStartScreen.value.x);
+  const height = Math.abs(selectEndScreen.value.y - selectStartScreen.value.y);
+  return { left, top, width, height };
 });
+
+const selectionRectStyle = computed(() => ({
+  left: `${selectionRect.value.left}px`,
+  top: `${selectionRect.value.top}px`,
+  width: `${selectionRect.value.width}px`,
+  height: `${selectionRect.value.height}px`
+}));
 
 function init() {
   if (!canvasRef.value) return;
@@ -94,135 +112,272 @@ function init() {
   renderer = new Renderer(canvasRef.value, hexMath);
   store.setRenderer(renderer);
   
-  interactionManager = new InteractionManager(
-    canvasRef.value,
-    renderer,
-    hexMath,
-    spatialIndex,
-    {
-      onHexSelect: (hex) => {
-        emit('hexSelect', hex);
-      },
-      onSelectionChange: (ids) => {
-        emit('selectionChange', ids);
-      },
-      onViewportChange: (x, y, z) => {
-        zoom.value = z;
-        emit('viewportChange', x, y, z);
-      }
-    }
-  );
-  
   renderer.startRenderLoop(() => {
     render();
   });
   
-  // Draw grid background
-  drawGridBackground();
   render();
-}
-
-function drawGridBackground() {
-  if (!canvasRef.value) return;
-  const ctx = canvasRef.value.getContext('2d');
-  if (!ctx) return;
-  
-  // Create a pattern for the grid
-  const patternCanvas = document.createElement('canvas');
-  const patternCtx = patternCanvas.getContext('2d');
-  if (!patternCtx) return;
-  
-  patternCanvas.width = 40;
-  patternCanvas.height = 40;
-  
-  // Draw grid lines
-  patternCtx.strokeStyle = 'rgba(0, 212, 255, 0.06)';
-  patternCtx.lineWidth = 1;
-  patternCtx.beginPath();
-  patternCtx.moveTo(0, 0);
-  patternCtx.lineTo(40, 0);
-  patternCtx.moveTo(0, 0);
-  patternCtx.lineTo(0, 40);
-  patternCtx.stroke();
-  
-  // Draw major grid lines
-  patternCtx.strokeStyle = 'rgba(0, 212, 255, 0.12)';
-  patternCtx.lineWidth = 2;
-  patternCtx.beginPath();
-  patternCtx.moveTo(0, 0);
-  patternCtx.lineTo(40, 0);
-  patternCtx.moveTo(0, 0);
-  patternCtx.lineTo(0, 40);
-  patternCtx.stroke();
 }
 
 function render() {
   if (!renderer) return;
-  renderer.renderHexagons(store.hexagons, store.selectedIds, spatialIndex);
+  renderer.renderHexagons(store.hexagons, store.selectedIds);
+}
+
+function getCanvasRect(): DOMRect | null {
+  return canvasRef.value?.getBoundingClientRect() ?? null;
+}
+
+function getContainerRect(): DOMRect | null {
+  return containerRef.value?.getBoundingClientRect() ?? null;
 }
 
 function onMouseDown(e: MouseEvent) {
-  if (!interactionManager) return;
+  if (!renderer || !spatialIndex || !hexMath) return;
   
-  const rect = canvasRef.value!.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
+  const canvasRect = getCanvasRect();
+  if (!canvasRect) return;
   
-  if (e.button === 0 && !e.ctrlKey) {
-    const worldPos = renderer!.screenToWorld(x, y);
-    isSelecting.value = true;
-    selectStart.value = worldPos;
-    selectEnd.value = worldPos;
+  const screenX = e.clientX - canvasRect.left;
+  const screenY = e.clientY - canvasRect.top;
+  const worldPos = renderer.screenToWorld(screenX, screenY);
+  
+  // Track Ctrl key state
+  ctrlHeld.value = e.ctrlKey || e.metaKey;
+  
+  // Right click or middle click = pan
+  if (e.button === 2 || e.button === 1) {
+    isPanning.value = true;
+    lastPanX.value = e.clientX;
+    lastPanY.value = e.clientY;
+    canvasRef.value!.style.cursor = 'grabbing';
+    return;
+  }
+  
+  // Left click
+  if (e.button === 0) {
+    // Check if clicking on a hexagon
+    const hex = spatialIndex.queryPoint(worldPos.x, worldPos.y, hexMath);
+    
+    if (hex) {
+      // Clicked on hex - handle selection
+      if (ctrlHeld.value) {
+        // Toggle selection (add/remove)
+        const newIds = new Set(store.selectedIds);
+        if (newIds.has(hex.id)) {
+          newIds.delete(hex.id);
+        } else {
+          newIds.add(hex.id);
+        }
+        emit('selectionChange', newIds, true);
+      } else {
+        // Single select
+        emit('hexSelect', hex);
+      }
+      isDragging.value = true;
+      dragHexes.value = hex ? [hex] : [];
+      canvasRef.value!.style.cursor = 'move';
+    } else {
+      // Clicked on empty space - start box selection
+      if (!ctrlHeld.value) {
+        // Clear selection if not holding Ctrl
+        store.clearSelection();
+      }
+      
+      isSelecting.value = true;
+      selectStartScreen.value = { x: screenX, y: screenY };
+      selectStartWorld.value = worldPos;
+      selectEndScreen.value = { x: screenX, y: screenY };
+      selectEndWorld.value = worldPos;
+      canvasRef.value!.style.cursor = 'crosshair';
+    }
   }
 }
 
 function onMouseMove(e: MouseEvent) {
   if (!renderer || !spatialIndex || !hexMath) return;
   
-  const rect = canvasRef.value!.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
+  const canvasRect = getCanvasRect();
+  if (!canvasRect) return;
+  
+  const screenX = e.clientX - canvasRect.left;
+  const screenY = e.clientY - canvasRect.top;
+  const worldPos = renderer.screenToWorld(screenX, screenY);
   
   // Update mouse world position
-  mouseWorldPos.value = renderer.screenToWorld(x, y);
+  mouseWorldPos.value = worldPos;
   
+  // Panning
+  if (isPanning.value) {
+    const dx = e.clientX - lastPanX.value;
+    const dy = e.clientY - lastPanY.value;
+    lastPanX.value = e.clientX;
+    lastPanY.value = e.clientY;
+    
+    const vp = renderer.getViewport();
+    renderer.setViewport({
+      x: vp.x + dx,
+      y: vp.y + dy,
+      zoom: vp.zoom
+    });
+    emit('viewportChange', vp.x + dx, vp.y + dy, vp.zoom);
+    return;
+  }
+  
+  // Box selection
   if (isSelecting.value) {
-    selectEnd.value = renderer.screenToWorld(x, y);
+    selectEndScreen.value = { x: screenX, y: screenY };
+    selectEndWorld.value = worldPos;
     
     // Calculate selection count in real-time
     const selectedHexes = spatialIndex.queryRect(
-      selectStart.value.x, selectStart.value.y,
-      selectEnd.value.x, selectEnd.value.y,
+      selectStartWorld.value.x, selectStartWorld.value.y,
+      selectEndWorld.value.x, selectEndWorld.value.y,
       hexMath
     );
     selectionCount.value = selectedHexes.length;
+    
+    // Draw selection rectangle
+    if (renderer) {
+      // Temporarily render selection rect
+      renderer.renderHexagons(store.hexagons, store.selectedIds);
+      renderer.renderSelectionRect(
+        selectStartWorld.value.x, selectStartWorld.value.y,
+        selectEndWorld.value.x, selectEndWorld.value.y
+      );
+    }
+    return;
+  }
+  
+  // Default cursor
+  if (!isDragging.value) {
+    if (store.toolMode === 'pan') {
+      canvasRef.value!.style.cursor = 'grab';
+    } else {
+      const hex = spatialIndex.queryPoint(worldPos.x, worldPos.y, hexMath);
+      canvasRef.value!.style.cursor = hex ? 'pointer' : 'default';
+    }
   }
 }
 
 function onMouseUp(e: MouseEvent) {
   if (!renderer || !spatialIndex || !hexMath) return;
   
+  // End panning
+  if (isPanning.value) {
+    isPanning.value = false;
+    canvasRef.value!.style.cursor = 'default';
+    return;
+  }
+  
+  // End dragging
+  if (isDragging.value) {
+    isDragging.value = false;
+    dragHexes.value = [];
+    canvasRef.value!.style.cursor = 'default';
+    return;
+  }
+  
+  // End box selection
   if (isSelecting.value) {
-    const selectedHexes = spatialIndex.queryRect(
-      selectStart.value.x, selectStart.value.y,
-      selectEnd.value.x, selectEnd.value.y,
-      hexMath
-    );
-    
-    const ids = new Set(selectedHexes.map(h => h.id));
-    emit('selectionChange', ids);
-    
     isSelecting.value = false;
+    
+    // Only process if selection rect is large enough
+    if (selectionRect.value.width > 5 || selectionRect.value.height > 5) {
+      const selectedHexes = spatialIndex.queryRect(
+        selectStartWorld.value.x, selectStartWorld.value.y,
+        selectEndWorld.value.x, selectEndWorld.value.y,
+        hexMath
+      );
+      
+      const selectedIds = new Set(selectedHexes.map(h => h.id));
+      
+      if (ctrlHeld.value) {
+        // Inverse selection: items in the rect become deselected, items outside become selected
+        const newIds = new Set<string>();
+        for (const [id, hex] of store.hexagons.entries()) {
+          if (selectedIds.has(id)) {
+            // Not selected - keep as is
+            if (store.selectedIds.has(id)) {
+              // Was selected, now in rect - remove from selection
+            } else {
+              // Was not selected - keep not selected
+            }
+          } else {
+            // Not in rect - should be selected
+            if (!store.selectedIds.has(id)) {
+              newIds.add(id);
+            } else {
+              newIds.add(id); // Keep selected
+            }
+          }
+        }
+        // Simpler: invert the relationship between selected and in-rect
+        // Items in rect that were selected -> unselected
+        // Items in rect that were not selected -> remain unselected
+        // Items outside rect that were selected -> remain selected
+        // Items outside rect that were not selected -> remain unselected
+        
+        // What user probably wants: items INSIDE rect become selected (or toggled)
+        // But ctrl+box = add to selection
+        const finalIds = new Set(store.selectedIds);
+        for (const id of selectedIds) {
+          finalIds.add(id);
+        }
+        emit('selectionChange', finalIds, true);
+      } else {
+        // Normal box selection - replace selection
+        emit('selectionChange', selectedIds, false);
+      }
+    }
+    
+    // Re-render to clear selection rect
+    render();
   }
 }
 
 function onWheel(e: WheelEvent) {
+  if (!renderer) return;
+  
+  e.preventDefault();
+  
+  const canvasRect = getCanvasRect();
+  if (!canvasRect) return;
+  
+  const vp = renderer.getViewport();
+  const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+  const newZoom = Math.max(0.1, Math.min(10, vp.zoom * zoomFactor));
+  
+  // Zoom towards mouse position
+  const mouseX = e.clientX - canvasRect.left;
+  const mouseY = e.clientY - canvasRect.top;
+  
+  const newX = mouseX - (mouseX - vp.x) * (newZoom / vp.zoom);
+  const newY = mouseY - (mouseY - vp.y) * (newZoom / vp.zoom);
+  
+  zoom.value = newZoom;
+  renderer.setViewport({ x: newX, y: newY, zoom: newZoom });
+  emit('viewportChange', newX, newY, newZoom);
+  
   // Show zoom hint briefly
   showZoomHint.value = true;
   setTimeout(() => { showZoomHint.value = false; }, 1000);
 }
 
-// Expose methods for parent component
+// Handle key events for Ctrl
+function onKeyDown(e: KeyboardEvent) {
+  if (e.ctrlKey || e.metaKey) {
+    ctrlHeld.value = true;
+  }
+}
+
+function onKeyUp(e: KeyboardEvent) {
+  if (!e.ctrlKey && !e.metaKey) {
+    ctrlHeld.value = false;
+  }
+}
+
+// Expose methods
 defineExpose({
   render: () => render(),
   resize: (w: number, h: number) => {
@@ -234,15 +389,20 @@ defineExpose({
 
 onMounted(() => {
   init();
+  
+  // Add global key listeners
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
 });
 
 onUnmounted(() => {
-  if (interactionManager) {
-    interactionManager.destroy();
-  }
   if (renderer) {
     renderer.stopRenderLoop();
   }
+  
+  // Remove global key listeners
+  window.removeEventListener('keydown', onKeyDown);
+  window.removeEventListener('keyup', onKeyUp);
 });
 
 // Watch viewport changes
@@ -336,14 +496,6 @@ watch(() => store.hexagons, () => {
   border: 1px solid rgba(0, 212, 255, 0.3);
   border-radius: var(--radius-md);
   backdrop-filter: blur(8px);
-  animation: zoom-fade 1s ease forwards;
-}
-
-@keyframes zoom-fade {
-  0% { opacity: 0; transform: translateY(10px); }
-  20% { opacity: 1; transform: translateY(0); }
-  80% { opacity: 1; }
-  100% { opacity: 0; }
 }
 
 /* Coordinate Display */
@@ -371,5 +523,16 @@ watch(() => store.hexagons, () => {
 .coord-value {
   color: var(--text-primary);
   min-width: 50px;
+}
+
+/* Transitions */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>
