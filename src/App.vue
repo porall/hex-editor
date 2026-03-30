@@ -37,6 +37,17 @@
           @batch-update="handleBatchUpdate"
         />
       </Transition>
+      
+      <ControlPanel
+        :is-open="isPanelOpen"
+        :current-zoom="store.viewport.zoom"
+        @open="isPanelOpen = true"
+        @close="isPanelOpen = false"
+        @zoom-change="handleZoomChange"
+        @reset-zoom="handleResetZoom"
+        @fit-to-screen="handleFitToScreen"
+        @apply-config="handleApplyConfig"
+      />
     </div>
 
     <!-- Loading Overlay -->
@@ -71,11 +82,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useEditorStore } from './stores/editorStore';
 import HexCanvas from './components/HexCanvas.vue';
 import Toolbar from './components/Toolbar.vue';
 import PropertyEditor from './components/PropertyEditor.vue';
+import ControlPanel from './components/ControlPanel.vue';
 import type { Hexagon } from './core/types';
 
 const store = useEditorStore();
@@ -87,6 +99,7 @@ const canvasHeight = ref(600);
 const isLoading = ref(false);
 const initProgress = ref(0);
 const toasts = ref<Array<{ id: number; message: string; type: string }>>([]);
+const isPanelOpen = ref(true);
 
 let toastId = 0;
 
@@ -210,6 +223,41 @@ function handleExport() {
   showToast('图片已导出', 'success');
 }
 
+// Control Panel handlers
+function handleZoomChange(zoom: number) {
+  const vp = store.viewport;
+  store.setViewport({ ...vp, zoom });
+}
+
+function handleResetZoom() {
+  store.centerViewport(canvasWidth.value, canvasHeight.value);
+  showToast('缩放已重置', 'info');
+}
+
+function handleFitToScreen() {
+  store.centerViewport(canvasWidth.value, canvasHeight.value);
+  showToast('已适应屏幕', 'info');
+}
+
+function handleApplyConfig(config: { count: number; size: number }) {
+  isLoading.value = true;
+  
+  // Update hex size in HexMath
+  store.hexMath.size = config.size;
+  
+  // Reinitialize with new count
+  store.initializeHexagons(config.count);
+  
+  // Re-center viewport
+  store.centerViewport(canvasWidth.value, canvasHeight.value);
+  
+  // Resize canvas to fit
+  handleResize();
+  
+  isLoading.value = false;
+  showToast(`已应用配置：${config.count.toLocaleString()} 个六边形，大小 ${config.size}px`, 'success');
+}
+
 // Keyboard shortcuts
 function handleKeyDown(e: KeyboardEvent) {
   if (e.ctrlKey || e.metaKey) {
@@ -238,8 +286,14 @@ function handleKeyDown(e: KeyboardEvent) {
 
 // Window resize
 function handleResize() {
-  const hasPanel = selectedHex.value !== null;
-  canvasWidth.value = window.innerWidth - (hasPanel ? 300 : 0);
+  const hasPropertyPanel = selectedHex.value !== null;
+  const hasControlPanel = isPanelOpen.value;
+  
+  let totalSidebarWidth = 0;
+  if (hasPropertyPanel) totalSidebarWidth += 300;
+  if (hasControlPanel) totalSidebarWidth += 320;
+  
+  canvasWidth.value = window.innerWidth - totalSidebarWidth;
   canvasHeight.value = window.innerHeight - 52;
   hexCanvasRef.value?.resize(canvasWidth.value, canvasHeight.value);
   
@@ -278,6 +332,13 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown);
   window.removeEventListener('resize', handleResize);
+});
+
+// Watch panel state changes
+watch(isPanelOpen, () => {
+  nextTick(() => {
+    handleResize();
+  });
 });
 </script>
 
