@@ -51,10 +51,10 @@ export interface HexStyle {
 
 // 默认样式
 export const DEFAULT_STYLE: HexStyle = {
-  fillColor: '#e8e8e8',
-  strokeColor: '#999999',
-  strokeWidth: 1,
-  selectedStrokeColor: '#2196F3',
+  fillColor: '#1e2530',
+  strokeColor: '#3d4654',
+  strokeWidth: 0.5,
+  selectedStrokeColor: '#00d4ff',
   selectedStrokeWidth: 2,
 };
 

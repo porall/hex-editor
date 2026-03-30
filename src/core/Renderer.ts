@@ -63,7 +63,7 @@ export class Renderer {
 
   // 清除画布
   clear(): void {
-    this.ctx.fillStyle = '#f5f5f5';
+    this.ctx.fillStyle = '#0d1117';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
   }
 

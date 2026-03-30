@@ -54,7 +54,7 @@ export const useEditorStore = defineStore('editor', () => {
           q,
           r,
           data: {
-            color: '#e8e8e8'
+            color: '#1e2530'
           }
         };
         hexagons.value.set(hex.id, hex);
