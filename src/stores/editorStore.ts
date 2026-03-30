@@ -70,6 +70,47 @@ export const useEditorStore = defineStore('editor', () => {
     // saveToHistory(); // 初始化不保存历史
   }
   
+  // 计算最优缩放级别
+  function calculateOptimalZoom(canvasWidth: number, canvasHeight: number): number {
+    if (hexagons.value.size === 0) return 1;
+    
+    // 估算六边形网格覆盖范围
+    const hexCount = hexagons.value.size;
+    const estimatedRadius = Math.ceil(Math.sqrt(hexCount / (2 * Math.sqrt(3))));
+    
+    // 六边形尺寸
+    const hexWidth = hexMath.value.width;
+    const hexHeight = hexMath.value.height;
+    
+    // 估算网格占用像素
+    const gridWidth = estimatedRadius * 2 * hexWidth;
+    const gridHeight = estimatedRadius * 2 * hexHeight;
+    
+    // 计算能完整显示网格所需的缩放
+    const scaleX = canvasWidth / gridWidth;
+    const scaleY = canvasHeight / gridHeight;
+    
+    // 取较小值确保完整显示，加上边距
+    return Math.min(scaleX, scaleY) * 0.8;
+  }
+  
+  // 将视口居中到画布
+  function centerViewport(canvasWidth: number, canvasHeight: number, zoom?: number): void {
+    // 网格中心 (0, 0) 在世界坐标系中
+    // 要让它显示在画布中心：
+    // screenX = worldX * zoom + viewport.x
+    // canvasWidth / 2 = 0 * zoom + viewport.x
+    // viewport.x = canvasWidth / 2
+    
+    const finalZoom = zoom ?? calculateOptimalZoom(canvasWidth, canvasHeight);
+    
+    viewport.value = {
+      x: canvasWidth / 2,
+      y: canvasHeight / 2,
+      zoom: finalZoom
+    };
+  }
+  
   // 选中六边形
   function selectHexagon(hex: Hexagon, addToSelection: boolean = false): void {
     if (!addToSelection) {
@@ -299,6 +340,8 @@ export const useEditorStore = defineStore('editor', () => {
     moveSelectedHexagons,
     updateHexagonData,
     setViewport,
+    centerViewport,
+    calculateOptimalZoom,
     setToolMode,
     toggleOrientation,
     undo,

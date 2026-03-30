@@ -71,7 +71,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import { useEditorStore } from './stores/editorStore';
 import HexCanvas from './components/HexCanvas.vue';
 import Toolbar from './components/Toolbar.vue';
@@ -242,6 +242,11 @@ function handleResize() {
   canvasWidth.value = window.innerWidth - (hasPanel ? 300 : 0);
   canvasHeight.value = window.innerHeight - 52;
   hexCanvasRef.value?.resize(canvasWidth.value, canvasHeight.value);
+  
+  // Update viewport to stay centered after resize
+  if (store.hexagonCount > 0) {
+    store.centerViewport(canvasWidth.value, canvasHeight.value);
+  }
 }
 
 // Initialize
@@ -256,16 +261,18 @@ onMounted(async () => {
   
   store.initializeHexagons(200000);
   
-  setTimeout(() => {
-    store.setViewport({ x: 100, y: 100, zoom: 0.5 });
-    isLoading.value = false;
-    showToast('已加载 200,000 个六边形', 'success');
-  }, 300);
+  // Wait for nextTick to ensure canvas dimensions are ready
+  await nextTick();
+  handleResize();
+  
+  // Center the viewport on the grid
+  store.centerViewport(canvasWidth.value, canvasHeight.value);
+  
+  isLoading.value = false;
+  showToast('已加载 200,000 个六边形', 'success');
   
   window.addEventListener('keydown', handleKeyDown);
   window.addEventListener('resize', handleResize);
-  
-  handleResize();
 });
 
 onUnmounted(() => {
